@@ -52,3 +52,9 @@ PC에서는 번호 확인 요청 취소 후 같은 등록 창에서 재시도할
 ## 1.0.2 업데이트 기능
 
 자동 업데이트의 신규 버전 비교, 다운그레이드/동일 버전 무시, 지원 Android 버전 검사, 다른 호스트/HTTP/사용자정보가 들어간 URL 거부, 잘못된 해시와 초과 크기 거부를 JVM 테스트 5개로 검증합니다. Android 린트와 release 서명 검증도 실행합니다. 실제 폰에서 알림 허용, 이 출처 설치 허용, APK 설치 확인, 앱 재시작 후 등록 정보 유지, 백그라운드 작업 실행 및 실제 다음 버전 설치는 별도 확인이 필요합니다.
+
+## 공개 릴리스 검증
+
+최종 1.0.3은 [GitHub Actions](https://github.com/Mangom72/pc-hotspot/actions/runs/37199785770)에서 Python 22개와 업데이트 정책 JVM 5개, Android release 빌드·린트를 통과해 [릴리스](https://github.com/Mangom72/pc-hotspot/releases/tag/v1.0.3)에 게시되었습니다. 로그인을 하지 않은 HTTPS 요청으로 앱의 `releases/latest/download/update.json` 주소를 조회했습니다. 릴리스 APK를 다시 내려받아 매니페스트의 크기/SHA-256과 일치함을 검증했고, 초기 앱과 같은 서명 인증서임을 확인했습니다. 최종 로컬 설치 파일도 이 CI 릴리스 APK로 맞췄습니다.
+
+서명 인증서 SHA-256: `379223aaaae496bab182a0101aacf05929570201ffeb0a6a9b74ca38b0c4fc38`. APK의 실제 폰 설치·백그라운드 확인·알림·차기 버전 적용 확인은 폰에서 진행해야 합니다.

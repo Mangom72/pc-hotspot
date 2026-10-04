@@ -10,3 +10,4 @@ artifacts/android-lint.html
 artifacts/update.json
 artifacts/android-build.txt
 artifacts/*.sha256
+android/.kotlin/

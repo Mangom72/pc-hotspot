@@ -1,0 +1,55 @@
+name: Signed Android release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install SDK
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Test PC authorization and control
+        run: |
+          python -m pip install -r pc/requirements.txt
+          python -m unittest discover -s tests -v
+      - name: Prepare signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$KEYSTORE_BASE64"
+          umask 077
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.jks"
+      - name: Build and validate
+        working-directory: android
+        env:
+          HOTSPOT_KEYSTORE: ${{ runner.temp }}/release.jks
+          HOTSPOT_KEY_PASSWORD: ${{ secrets.HOTSPOT_KEY_PASSWORD }}
+        run: ./gradlew --no-daemon assembleRelease lintRelease testReleaseUnitTest
+      - name: Package signed release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          mkdir -p artifacts
+          cp android/app/build/outputs/apk/release/app-release.apk "artifacts/pc-hotspot-$version.apk"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "artifacts/pc-hotspot-$version.apk"
+          python3 scripts/create-update-manifest.py "artifacts/pc-hotspot-$version.apk"
+          python3 - "$version" <<'PY'
+          import json, sys
+          assert json.load(open('artifacts/update.json'))['versionName'] == sys.argv[1], 'Tag and app version differ'
+          PY
+          (cd artifacts && sha256sum "pc-hotspot-$version.apk" > "pc-hotspot-$version.apk.sha256")
+          gh release create "$GITHUB_REF_NAME" \
+            "artifacts/pc-hotspot-$version.apk" "artifacts/pc-hotspot-$version.apk.sha256" artifacts/update.json \
+            --title "PC 핫스팟 $version" --generate-notes
+      - name: Remove signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.jks"

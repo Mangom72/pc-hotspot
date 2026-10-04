@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+"""Single F9: GFN login. Double F9: toggle the existing Wi-Fi hotspot."""
+
+import fcntl
+import json
+import os
+from pathlib import Path
+import subprocess
+import time
+import uuid
+import sys
+
+sys.path.insert(0, str(Path.home() / ".local/share/pc-hotspot"))
+from hotspot_control import ControlError, show_widget, restore_hotspot_status, toggle_hotspot
+
+
+DOUBLE_PRESS_SECONDS = 0.8
+GFN_LOGIN = Path.home() / ".local/bin/gfn-login"
+RUNTIME_DIR = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
+LOCK_FILE = RUNTIME_DIR / "f9-action.lock"
+STATE_FILE = RUNTIME_DIR / "f9-action.json"
+
+
+
+
+
+
+
+
+def read_state() -> dict:
+    try:
+        return json.loads(STATE_FILE.read_text())
+    except (FileNotFoundError, ValueError):
+        return {}
+
+
+def write_state(state: dict) -> None:
+    STATE_FILE.write_text(json.dumps(state))
+
+
+
+
+def main() -> None:
+    token = uuid.uuid4().hex
+    with LOCK_FILE.open("a+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        now = time.monotonic()
+        state = read_state()
+        age = now - state.get("at", 0)
+        if state.get("mode") == "pending" and 0 <= age <= DOUBLE_PRESS_SECONDS:
+            write_state({"mode": "double", "at": now})
+            show_widget("핫스팟 전환 중", "연결 상태를 확인하고 있습니다", tone="info", expires=5)
+            action = "hotspot"
+        elif state.get("mode") == "double" and 0 <= age <= DOUBLE_PRESS_SECONDS:
+            return  # Ignore an accidental third key press.
+        else:
+            write_state({"mode": "pending", "at": now, "token": token})
+            show_widget("F9 입력 대기", "핫스팟 전환: F9 한 번 더", tone="info",
+                        expires=DOUBLE_PRESS_SECONDS, countdown_until=time.time() + DOUBLE_PRESS_SECONDS)
+            action = "wait"
+
+    if action == "hotspot":
+        try:
+            toggle_hotspot()
+        except (ControlError, OSError, subprocess.CalledProcessError) as exc:
+            show_widget("핫스팟 전환 실패", str(exc), tone="error", expires=5)
+        return
+
+    time.sleep(DOUBLE_PRESS_SECONDS)
+    with LOCK_FILE.open("a+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        state = read_state()
+        if state.get("mode") != "pending" or state.get("token") != token:
+            return
+        write_state({"mode": "single", "at": time.monotonic()})
+        try:
+            restore_hotspot_status()
+        except (ControlError, OSError, subprocess.CalledProcessError):
+            show_widget("", visible=False)
+    subprocess.run([str(GFN_LOGIN), "auto"], check=False)
+
+
+if __name__ == "__main__":
+    main()

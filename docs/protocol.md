@@ -1,0 +1,27 @@
+# BLE protocol v1
+
+The PC advertises `PC Hotspot` and service UUID `af937001-6d7b-4b87-93ea-9a6b7dc44e10`. UUID suffixes `002`, `003`, and `004` identify state, command, and result respectively. All payloads fit the minimum ATT MTU of 23; no MTU negotiation or JSON framing is needed.
+
+| Characteristic | Operation | Bytes |
+|---|---|---|
+| State (`002`) | authenticated encrypted read | version `1`, state, code |
+| Command (`003`) | authenticated encrypted write with response | version `1`, enabled `0/1`, 8 opaque random request-ID bytes |
+| Result (`004`) | authenticated encrypted read/notification | version `1`, state, code, same 8 request-ID bytes |
+
+State: `0` off, `1` on, `2` unknown. Code: `0` success, `1` busy, `2` another Wi-Fi is active, `3` NetworkManager failed. Result notifications may arrive before the write acknowledgement; the client buffers matching results. Partial/prepared writes, unsupported versions, invalid lengths and nonboolean target states are rejected.
+
+The tile subscribes to results, reads the live state, and sends the opposite **explicit desired state**. It matches the result ID and then reads the live state again. The server checks current state inside a nonblocking `flock` shared with F9 and applies only the requested state. Repeated explicit settings are idempotent. The server retains the last 128 `(phone address, request ID)` results for its lifetime; a duplicated ID does not execute another operation, and an ID reused for another target is rejected. The client never retries a command, including after process restart. There is no durable command queue. A control transaction has a 40-second deadline; state-query subprocesses time out after at most 5 seconds, and no new NetworkManager command is launched after the deadline. An already accepted NetworkManager activation can still finish if its acknowledgement is lost, which is why clients read actual state rather than retrying.
+
+After a possibly delivered write fails, the client reconnects once and only reads actual state. The outcome is reported as uncertain even if that state matches the desired state: another input could have changed it. A new tap starts a new transaction. Query sessions close on completion or when the panel is hidden. Toggle sessions close when completed, cancelled or the service is destroyed. The phone does not perform background scans; registration first opens an explicit LE GATT link and uses an authenticated state read to trigger Android's bonding flow; it does not call transport-AUTO createBond before connecting. Registration scans last 10 seconds and normal sessions directly connect to the stored address with `autoConnect=false`.
+
+## Authorization
+
+The server accepts GATT/Agent method invocations only from the current BlueZ system-bus owner. An external local system-bus caller cannot spoof the `device` option to operate the hotspot. Every characteristic read and command write also checks the actual BlueZ device identity, connection, persisted bond, and the allowlist. Characteristic/CCC flags require authenticated encrypted transport, so BlueZ enforces link encryption before invoking application code.
+
+Enrollment is a local Unix-socket operation, limited to the desktop user by a mode-0600 socket in their runtime directory. The PC agent uses `DisplayYesNo` and requires numerical comparison approved at the PC terminal. Just Works is rejected. Cancelled numeric comparisons discard the candidate, so another attempt within the same enrollment window can proceed. Local approvals carry a candidate ID and cannot approve a replacement request using an old displayed number. Approval alone does not grant control: the connection must be bonded and complete an authenticated state read within the 120-second enrollment window. Then one phone identity is atomically saved to a mode-0600 allowlist and enrollment closes. Existing unrelated Bluetooth bonds are never promoted into this allowlist or marked Trusted. A new phone requires explicit local revocation of the existing phone first.
+
+During enrollment, the agent is temporarily registered as default, and the adapter is pairable with a 120-second adapter timeout. Normal completion, explicit close, terminal interruption, and service shutdown restore the previous pairable settings and unregister the agent. A mode-0600 recovery file restores previous adapter settings if the service crashes during enrollment. Enrollment itself is never resumed after restart. Only service startup is retried by systemd; commands are never persisted or retried.
+
+BlueZ's `StartNotify` API supplies no device argument. Therefore a notification is **not** an authorization mechanism: authenticated-link CCC protection is enforced by BlueZ, and the strict per-device checks remain on every state/result read and command write. Another independently bonded device might subscribe to the compact result notification if BlueZ permits it. Notifications contain only on/off/unknown, an error code and an opaque request ID, never Wi-Fi credentials or enrollment authority. It still cannot query the protected state characteristic or control the PC. The design's access guarantee is that only the locally enrolled bonded phone can issue control commands.
+
+The local desktop user, their files, the kernel, BlueZ, and NetworkManager are trusted. Existing Internet sharing, VPN routing, and firewall policy are not rewritten. This is proximity control of an already running PC, not remote Internet access or PC wake-up.

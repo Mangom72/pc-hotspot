@@ -1,0 +1,58 @@
+#!/usr/bin/env python3
+"""Local enrollment console; no remote enrollment API exists."""
+import json
+import os
+from pathlib import Path
+import socket
+import sys
+import time
+
+SOCKET = Path(os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')) / 'pc-hotspot.sock'
+def rpc(op, **kwargs):
+    with socket.socket(socket.AF_UNIX) as s:
+        s.settimeout(10)
+        s.connect(str(SOCKET))
+        s.sendall((json.dumps(dict(op=op, **kwargs)) + '\n').encode())
+        with s.makefile('r') as stream:
+            response = json.loads(stream.readline())
+    if not response['ok']: raise RuntimeError(response['error'])
+    return response
+
+def main():
+    op = sys.argv[1] if len(sys.argv) == 2 else 'help'
+    if op in ('status', 'close', 'revoke'):
+        print(json.dumps(rpc(op), ensure_ascii=False, indent=2))
+    elif op == 'enroll':
+        rpc('enroll')
+        print('등록 모드 120초. 폰 앱에서 PC를 선택하고 페어링 번호를 확인하세요.', flush=True)
+        seen_id = None
+        try:
+            while True:
+                status = rpc('status')
+                if status['addresses']:
+                    print('등록 완료. 등록 모드를 닫았습니다.')
+                    break
+                if not status['enrolling']:
+                    print('등록 시간 만료. 명령은 실행되지 않았습니다.')
+                    break
+                candidate = status['candidate']
+                if candidate and candidate['id'] != seen_id:
+                    seen_id = candidate['id']
+                    print(f"폰 주소: {candidate['address']} · 번호: {candidate['passkey']}", flush=True)
+                    answer = input('폰에 같은 번호가 표시됩니까? 승인하려면 yes: ')
+                    rpc('approve', candidate_id=candidate['id'], yes=answer.strip().lower() == 'yes')
+                    if answer.strip().lower() != 'yes': break
+                time.sleep(1)
+        finally:
+            rpc('close')
+    else:
+        print('사용법: pc-hotspot enroll | status | close | revoke')
+
+if __name__ == '__main__':
+    try:
+        main()
+    except (OSError, RuntimeError, ValueError) as exc:
+        print(f'오류: {exc}', file=sys.stderr)
+        sys.exit(1)
+    except (KeyboardInterrupt, EOFError):
+        sys.exit(130)

@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+android/.gradle/
+android/**/build/
+android/local.properties
+.signing/
+artifacts/*.apk
+artifacts/android-lint.html
+artifacts/update.json
+artifacts/android-build.txt
+artifacts/*.sha256

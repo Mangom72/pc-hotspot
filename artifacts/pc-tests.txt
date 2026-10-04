@@ -1,0 +1,29 @@
+test_busy_rejected_without_later_execution (test_ble.BleTests.test_busy_rejected_without_later_execution) ... ok
+test_cancel_allows_a_fresh_pairing_attempt (test_ble.BleTests.test_cancel_allows_a_fresh_pairing_attempt) ... ok
+test_duplicate_request_deduplicated_and_conflict_denied (test_ble.BleTests.test_duplicate_request_deduplicated_and_conflict_denied) ... ok
+test_expired_registration_denied (test_ble.BleTests.test_expired_registration_denied) ... ok
+test_invalid_and_partial_requests_denied (test_ble.BleTests.test_invalid_and_partial_requests_denied) ... ok
+test_just_works_is_rejected (test_ble.BleTests.test_just_works_is_rejected) ... Rejected pairing without numeric comparison: /org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF
+ok
+test_local_confirmation_required_and_session_closes (test_ble.BleTests.test_local_confirmation_required_and_session_closes) ... ok
+test_numeric_confirmation_waits_for_local_approval (test_ble.BleTests.test_numeric_confirmation_waits_for_local_approval) ... ok
+test_security_flags (test_ble.BleTests.test_security_flags) ... ok
+test_stale_terminal_approval_cannot_approve_new_candidate (test_ble.BleTests.test_stale_terminal_approval_cannot_approve_new_candidate) ... Local control: 페어링 요청이 변경되었습니다. 현재 번호를 다시 확인하세요.
+ok
+test_unbonded_phone_denied_even_if_allowlisted (test_ble.BleTests.test_unbonded_phone_denied_even_if_allowlisted) ... ok
+test_unknown_phone_denied (test_ble.BleTests.test_unknown_phone_denied) ... ok
+test_unknown_phone_never_reaches_control (test_ble.BleTests.test_unknown_phone_never_reaches_control) ... ok
+test_contending_process_is_rejected_not_queued (test_control.ControlTests.test_contending_process_is_rejected_not_queued) ... ok
+test_duplicate_profile_name_not_mistaken_for_hotspot (test_control.ControlTests.test_duplicate_profile_name_not_mistaken_for_hotspot) ... ok
+test_expired_deadline_never_launches_a_command (test_control.ControlTests.test_expired_deadline_never_launches_a_command) ... ok
+test_failed_command_does_not_retry (test_control.ControlTests.test_failed_command_does_not_retry) ... ok
+test_other_wifi_never_disconnected (test_control.ControlTests.test_other_wifi_never_disconnected) ... ok
+test_set_is_explicit_and_idempotent (test_control.ControlTests.test_set_is_explicit_and_idempotent) ... ok
+test_toggle_reads_inside_lock (test_control.ControlTests.test_toggle_reads_inside_lock) ... ok
+test_double_and_accidental_triple_only_toggle_once (test_f9.F9Tests.test_double_and_accidental_triple_only_toggle_once) ... ok
+test_single_press_keeps_gfn_login (test_f9.F9Tests.test_single_press_keeps_gfn_login) ... ok
+
+----------------------------------------------------------------------
+Ran 22 tests in 0.198s
+
+OK

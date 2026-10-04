@@ -20,7 +20,7 @@
 | 자동 실행 설정 | 사용자 서비스 enabled, 이 사용자 Linger=yes 확인 |
 | 셸/파이썬 문법 | bash -n 및 py_compile 통과 |
 
-자동 테스트 로그: [../artifacts/pc-tests.txt](../artifacts/pc-tests.txt). APK 해시: [APK SHA-256](https://github.com/Mangom72/pc-hotspot/releases/download/v1.0.2/pc-hotspot-1.0.2.apk.sha256). Android 린트 보고서는 빌드 디렉터리의 `android/app/build/reports/lint-results-release.html`에 있습니다.
+자동 테스트 로그: [../artifacts/pc-tests.txt](../artifacts/pc-tests.txt). APK 해시: [APK SHA-256](https://github.com/Mangom72/pc-hotspot/releases/download/v1.0.3/pc-hotspot-1.0.3.apk.sha256). Android 린트 보고서는 빌드 디렉터리의 `android/app/build/reports/lint-results-release.html`에 있습니다.
 
 테스트 당시 Wi-Fi 장치는 연결되지 않았고 유선 네트워크는 연결되어 있었습니다. NordVPN CLI는 `Disconnected`를 보고했으며 VPN 설정을 변경하거나 연결/해제하지 않았습니다. 따라서 VPN 연결 상태에서의 인터넷 공유 검증은 아래 항목으로 남습니다. 기존 AdGuard/NordVPN/방화벽 구성에는 설치 코드가 손대지 않습니다.
 

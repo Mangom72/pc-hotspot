@@ -20,6 +20,12 @@ The current PC protocol enrolls one phone. Additional tablets require a separate
 
 Automatic monitoring is opt-in; opening the app resumes it if enabled. After a phone reboot, open the app to resume monitoring. It does not turn Wi-Fi on or bypass system network selection. It does not create a VPN or modify AdGuard.
 
+## Optional Shizuku direct switching (1.0.6)
+
+Official SDK: https://github.com/RikkaApps/Shizuku-API (api/provider 13.1.5).
+Official setup: https://shizuku.rikka.app/guide/setup/.
+The user explicitly grants Shizuku access and selects direct switching. A non-daemon UserService runs as shell, exposing only connect/configured-SSID status methods. Commands use structured ProcessBuilder arguments, never a shell string. Credentials and raw command output are not logged or returned through Binder. The service saves the network via Android's `cmd wifi connect-network` command and checks `cmd wifi status` until association is reported; command acceptance alone does not count as connection. A connection attempt has bounded timeouts and no repeated network switching loop. BLE loss/off or opt-out cancels pending polling; a command already handed to Android cannot be withdrawn. This mode adds/saves the target network, but does not delete other saved networks or change a VPN. Without root, Shizuku must be restarted after a reboot. Suggestions remain available as a separate mode.
+
 ## App updates
 
 Existing signed GitHub-release updates are preserved. The scheduler checks approximately every six hours when enabled; timing is controlled by Android. A new toggle cancels/resumes periodic checks. Manual checking is always available. Downloaded APK size, hash, package, version and signing certificate are verified. Installation requires the user to approve the Android installer. Disabling automatic checks does not remove a downloaded valid update.

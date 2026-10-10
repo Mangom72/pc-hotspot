@@ -52,11 +52,13 @@ class AutoConnectService : Service() {
     private var retryDelay = 10_000L
     private var previous = -1
     private var message = "등록된 PC를 찾고 있습니다"
+    private lateinit var direct: DirectWifi
     private val retry = Runnable { connect() }
     private val notificationManager get() = getSystemService(NotificationManager::class.java)
     override fun onBind(intent: Intent?) = null
     override fun onCreate() {
         super.onCreate()
+        direct = DirectWifi(this)
         notificationManager.createNotificationChannel(NotificationChannel("auto_connect", "핫스팟 자동 연결", NotificationManager.IMPORTANCE_LOW))
         startForeground(7031, notification())
     }
@@ -64,6 +66,7 @@ class AutoConnectService : Service() {
         if (intent?.action == "stop" || !AutoConnect.enabled(this)) {
             AutoConnect.stop(this); stopSelf(); return START_NOT_STICKY
         }
+        if (intent?.action == "reconnect") { session?.cancel(); session = null; previous = -1; direct.cancel() }
         if (session == null) { handler.removeCallbacks(retry); connect() }
         return START_STICKY
     }
@@ -76,12 +79,20 @@ class AutoConnectService : Service() {
                 retryDelay = 10_000
                 if (previous != outcome.state) {
                     previous = outcome.state
-                    if (outcome.state == 1) update("핫스팟 켜짐 · ${AutoConnect.register(this)}")
-                    else { AutoConnect.remove(this); update("핫스팟이 켜지면 연결을 시도합니다") }
+                    if (outcome.state == 1) {
+                        if (AutoConnect.prefs(this).getBoolean("direct", false)) {
+                            val p = AutoConnect.prefs(this)
+                            val ssid = p.getString("ssid", null)
+                            val password = p.getString("password", null)
+                            if (ssid == null || password == null) update("핫스팟 연결 정보를 저장하세요")
+                            else direct.connect(ssid, password) { update(it) }
+                        } else update("핫스팟 켜짐 · ${AutoConnect.register(this)}")
+                    } else { direct.cancel(); AutoConnect.remove(this); update("핫스팟이 켜지면 연결을 시도합니다") }
                 }
             } else {
                 session?.cancel(); session = null
                 previous = -1
+                direct.cancel()
                 AutoConnect.remove(this)
                 update("PC 연결 대기 · ${outcome.message}")
                 handler.removeCallbacks(retry)
@@ -111,6 +122,7 @@ class AutoConnectService : Service() {
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
         session?.cancel(); session = null
+        direct.close()
         AutoConnect.remove(this)
         notificationManager.cancel(7031)
         super.onDestroy()

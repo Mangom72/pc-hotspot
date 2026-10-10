@@ -13,6 +13,7 @@ import android.provider.Settings
 import android.service.quicksettings.TileService
 import android.view.View
 import android.widget.*
+import rikka.shizuku.Shizuku
 
 @Suppress("DEPRECATION", "MissingPermission", "SetTextI18n")
 class MainActivity : Activity() {
@@ -36,10 +37,41 @@ class MainActivity : Activity() {
     private lateinit var installUpdate: Button
     private lateinit var checkUpdate: Button
     private var autoSwitch: Switch? = null
+    private val autoListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == "status") handler.post { if (!isDestroyed && ::autoStatus.isInitialized) refreshAutoStatus() }
+    }
+    private val shizukuPermission = Shizuku.OnRequestPermissionResultListener { code, result ->
+        if (code == 7040) {
+            if (result == PackageManager.PERMISSION_GRANTED) {
+                AutoConnect.prefs(this).edit().putBoolean("direct", true).apply()
+                retryDirect()
+            } else Toast.makeText(this, "Shizuku 권한이 필요합니다", Toast.LENGTH_LONG).show()
+            refreshAutoStatus()
+        }
+    }
+    private fun retryDirect() {
+        if (AutoConnect.enabled(this)) startForegroundService(Intent(this, AutoConnectService::class.java).setAction("reconnect"))
+    }
+    private fun enableDirect() {
+        if (!runCatching { Shizuku.pingBinder() }.getOrDefault(false)) {
+            android.app.AlertDialog.Builder(this).setTitle("Shizuku를 시작하세요")
+                .setMessage("Shizuku 앱에서 무선 디버깅으로 시작한 뒤 돌아와 주세요. 폰을 재부팅하면 다시 시작해야 합니다.")
+                .setPositiveButton("Shizuku 열기") { _, _ ->
+                    val launch = packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api")
+                    startActivity(launch ?: Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://shizuku.rikka.app/download/")))
+                }.setNegativeButton("닫기", null).show()
+        } else if (DirectWifi.ready()) {
+            AutoConnect.prefs(this).edit().putBoolean("direct", true).apply(); retryDirect(); refreshAutoStatus()
+        } else runCatching { Shizuku.requestPermission(7040) }.onFailure {
+            Toast.makeText(this, "Shizuku에서 PC 핫스팟 권한을 허용하세요", Toast.LENGTH_LONG).show()
+        }
+    }
     override fun onCreate(state: Bundle?) {
         val night = resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK == android.content.res.Configuration.UI_MODE_NIGHT_YES
         setTheme(if (night) android.R.style.Theme_Material_NoActionBar else android.R.style.Theme_Material_Light_NoActionBar)
         super.onCreate(state)
+        Shizuku.addRequestPermissionResultListener(shizukuPermission)
+        AutoConnect.prefs(this).registerOnSharedPreferenceChangeListener(autoListener)
         ui = OneUi(this)
         window.statusBarColor = android.graphics.Color.TRANSPARENT
         window.navigationBarColor = android.graphics.Color.TRANSPARENT
@@ -91,6 +123,11 @@ class MainActivity : Activity() {
         }
         autoStatus = ui.label("", 14f, true); automatic.addView(autoStatus)
         ui.button(automatic, "연결 정보 설정") { configureAutoConnect() }
+        ui.button(automatic, "Shizuku 직접 전환 사용") { enableDirect() }
+        ui.button(automatic, "Android 연결 제안 사용") {
+            AutoConnect.prefs(this).edit().putBoolean("direct", false).apply(); retryDirect(); refreshAutoStatus()
+        }
+        ui.button(automatic, "자동 연결 다시 시도") { retryDirect() }
         ui.button(automatic, "Wi-Fi 설정") { startActivity(Intent(Settings.ACTION_WIFI_SETTINGS)) }
         val setup = ui.section(connectionPage, "PC 등록")
         setup.addView(ui.label("처음에는 PC에서 등록 모드를 연 뒤 검색하세요. 페어링 번호가 같으면 양쪽에서 승인하세요.", 14f, true))
@@ -160,7 +197,9 @@ class MainActivity : Activity() {
         else status.text = "빠른 설정 편집에서 ‘PC 핫스팟’을 추가하세요"
     }
     private fun refreshAutoStatus() {
-        autoStatus.text = if (AutoConnect.enabled(this)) AutoConnect.prefs(this).getString("status", "PC 연결 대기") else "꺼짐 · 필요할 때 켜 주세요"
+        val p = AutoConnect.prefs(this)
+        val mode = if (p.getBoolean("direct", false)) "직접 전환 · ${DirectWifi.status()}" else "Android 연결 제안 · 전환 여부는 Android가 결정합니다"
+        autoStatus.text = mode + "\n" + if (AutoConnect.enabled(this)) p.getString("status", "PC 연결 대기") else "꺼짐 · 필요할 때 켜 주세요"
         autoSwitch?.setOnCheckedChangeListener(null)
         autoSwitch?.isChecked = AutoConnect.enabled(this)
         autoSwitch?.setOnCheckedChangeListener { _, enabled ->
@@ -182,7 +221,8 @@ class MainActivity : Activity() {
             transformationMethod = android.text.method.PasswordTransformationMethod.getInstance()
         }
         form.addView(ssid); form.addView(password)
-        form.addView(ui.label("다른 Wi-Fi를 사용 중이면 Android가 현재 연결을 유지할 수 있습니다.", 13f, true))
+        form.importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
+        form.addView(ui.label("다른 Wi-Fi에서 직접 전환하려면 Shizuku 직접 전환을 사용하세요.", 13f, true))
         val dialog = android.app.AlertDialog.Builder(this).setTitle("자동 연결 설정").setView(form)
             .setPositiveButton("저장 후 켜기", null).setNegativeButton("취소") { _, _ -> refreshAutoStatus() }.create()
         dialog.setOnCancelListener { refreshAutoStatus() }
@@ -195,7 +235,7 @@ class MainActivity : Activity() {
                 }
                 AutoConnect.stop(this)
                 p.edit().putString("ssid", name).putString("password", pass).putBoolean("enabled", true).apply()
-                autoStatus.text = AutoConnect.register(this)
+                if (!p.getBoolean("direct", false)) autoStatus.text = AutoConnect.register(this)
                 try {
                     startForegroundService(Intent(this, AutoConnectService::class.java))
                     dialog.dismiss(); refreshAutoStatus()
@@ -272,7 +312,11 @@ class MainActivity : Activity() {
         scanner = null
     }
     override fun onStop() { stopScanning(); super.onStop() }
-    override fun onDestroy() { session?.cancel(); session = null; handler.removeCallbacksAndMessages(null); super.onDestroy() }
+    override fun onDestroy() {
+        Shizuku.removeRequestPermissionResultListener(shizukuPermission)
+        AutoConnect.prefs(this).unregisterOnSharedPreferenceChangeListener(autoListener)
+        session?.cancel(); session = null; handler.removeCallbacksAndMessages(null); super.onDestroy()
+    }
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, results: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, results)
         if (requestCode == 2) {

@@ -6,8 +6,8 @@ android {
         applicationId = "kr.pc.hotspot"
         minSdk = 29
         targetSdk = 36
-        versionCode = 6
-        versionName = "1.0.5"
+        versionCode = 7
+        versionName = "1.0.6"
     }
     signingConfigs {
         create("localRelease") {
@@ -18,8 +18,13 @@ android {
         }
     }
     buildTypes { getByName("release") { signingConfig = signingConfigs.getByName("localRelease"); isMinifyEnabled = false } }
+    buildFeatures { aidl = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
 }
 
-dependencies { testImplementation("junit:junit:4.13.2") }
+dependencies {
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
+    testImplementation("junit:junit:4.13.2")
+}

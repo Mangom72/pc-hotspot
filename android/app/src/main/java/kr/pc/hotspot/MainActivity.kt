@@ -177,8 +177,9 @@ class MainActivity : Activity() {
         val ssid = EditText(this).apply { hint = "Wi-Fi 이름"; setText(p.getString("ssid", "archHotspot")); setSingleLine() }
         val password = EditText(this).apply {
             hint = if (p.contains("password")) "저장된 비밀번호 사용 · 변경할 때만 입력" else "핫스팟 비밀번호"
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
             setSingleLine()
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            transformationMethod = android.text.method.PasswordTransformationMethod.getInstance()
         }
         form.addView(ssid); form.addView(password)
         form.addView(ui.label("다른 Wi-Fi를 사용 중이면 Android가 현재 연결을 유지할 수 있습니다.", 13f, true))

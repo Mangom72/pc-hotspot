@@ -66,6 +66,8 @@ object UpdateManager {
         require(url.host in setOf("github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"))
         val connection = (url.openConnection() as HttpURLConnection).apply {
             connectTimeout = 10_000; readTimeout = 20_000; instanceFollowRedirects = false
+            useCaches = false
+            setRequestProperty("Cache-Control", "no-cache")
             setRequestProperty("User-Agent", "PC-Hotspot-Android")
         }
         val status = connection.responseCode
@@ -78,7 +80,7 @@ object UpdateManager {
         return connection
     }
     private fun downloadIfNew(c: Context): Result {
-        val feed = connect(UpdatePolicy.FEED_URL)
+        val feed = connect(UpdatePolicy.FEED_URL + "?check=" + System.currentTimeMillis())
         val manifest = try {
             val bytes = feed.inputStream.use { input ->
                 val output = java.io.ByteArrayOutputStream()

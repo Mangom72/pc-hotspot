@@ -22,7 +22,7 @@ object Protocol {
 }
 
 data class Outcome(val state: Int = 2, val message: String = "", val success: Boolean = false)
-enum class Mode { QUERY, TOGGLE, REGISTER }
+enum class Mode { QUERY, TOGGLE, REGISTER, WATCH }
 
 @Suppress("DEPRECATION", "MissingPermission")
 class BleSession(private val context: Context, private val address: String,
@@ -57,8 +57,11 @@ class BleSession(private val context: Context, private val address: String,
     }
     fun start() {
         check(Looper.myLooper() == Looper.getMainLooper())
-        if (!Protocol.busy.compareAndSet(false, true)) { finish(Outcome(message = "다른 요청 처리 중")); return }
-        ownsGate = true
+        // A read-only observer can coexist with an explicit tile command.
+        if (mode != Mode.WATCH) {
+            if (!Protocol.busy.compareAndSet(false, true)) { finish(Outcome(message = "다른 요청 처리 중")); return }
+            ownsGate = true
+        }
         try {
             if (!Protocol.permitted(context)) { finish(Outcome(message = "앱에서 근처 기기 권한을 허용하세요")); return }
             val adapter = context.getSystemService(BluetoothManager::class.java)?.adapter
@@ -112,8 +115,8 @@ class BleSession(private val context: Context, private val address: String,
         }
         override fun onServicesDiscovered(g: BluetoothGatt, status: Int) = dispatch(g) {
             if (status != BluetoothGatt.GATT_SUCCESS || char(Protocol.STATE) == null) { fail("PC 핫스팟 서비스를 찾을 수 없습니다"); return@dispatch }
-            if (mode == Mode.TOGGLE && !recovering) {
-                val result = char(Protocol.RESULT)
+            if ((mode == Mode.TOGGLE || mode == Mode.WATCH) && !recovering) {
+                val result = char(if (mode == Mode.WATCH) Protocol.STATE else Protocol.RESULT)
                 val ccc = result?.getDescriptor(Protocol.CCC)
                 if (result == null || ccc == null || !g.setCharacteristicNotification(result, true)) { fail("결과 알림 설정 실패"); return@dispatch }
                 ccc.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
@@ -142,6 +145,14 @@ class BleSession(private val context: Context, private val address: String,
     }
     private fun read(value: ByteArray, status: Int) {
         if (status != BluetoothGatt.GATT_SUCCESS) { fail("암호화 상태 조회 실패 (GATT $status) · PC 등록 모드와 페어링을 확인하세요"); return }
+        if (mode == Mode.WATCH) {
+            handler.removeCallbacks(timeout)
+            stage = "watch"
+            if (value.size == 3 && value[0].toInt() == 1 && value[1].toInt() in 0..1 && value[2].toInt() == 0)
+                complete(Outcome(value[1].toInt(), success = true))
+            else complete(Outcome(message = "PC 핫스팟 상태를 확인하지 못했습니다"))
+            return
+        }
         if (value.size != 3 || value[0].toInt() != 1 || value[1].toInt() !in 0..1 || value[2].toInt() != 0) { fail("PC에서 실제 핫스팟 상태를 확인하지 못했습니다"); return }
         val state = value[1].toInt()
         if (recovering) {
@@ -163,6 +174,11 @@ class BleSession(private val context: Context, private val address: String,
         }
     }
     private fun notification(value: ByteArray) {
+        if (mode == Mode.WATCH) {
+            // The initial authorized read must finish before accepting updates.
+            if (stage == "watch") read(value, BluetoothGatt.GATT_SUCCESS)
+            return
+        }
         if (value.size != 11 || value[0].toInt() != 1 || !value.copyOfRange(3, 11).contentEquals(request)) return
         commandResult = value.clone()
         if (stage == "result") result(value)

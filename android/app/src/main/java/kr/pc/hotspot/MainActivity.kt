@@ -29,81 +29,202 @@ class MainActivity : Activity() {
         else arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
     private fun permitted() = permissions.all { checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
     private fun button(container: LinearLayout, title: String, action: () -> Unit) {
-        container.addView(Button(this).apply { text = title; setOnClickListener { action() } })
+        ui.button(container, title, action = action)
     }
+    private lateinit var ui: OneUi
+    private lateinit var autoStatus: TextView
+    private lateinit var installUpdate: Button
+    private lateinit var checkUpdate: Button
+    private var autoSwitch: Switch? = null
     override fun onCreate(state: Bundle?) {
+        val night = resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK == android.content.res.Configuration.UI_MODE_NIGHT_YES
+        setTheme(if (night) android.R.style.Theme_Material_NoActionBar else android.R.style.Theme_Material_Light_NoActionBar)
         super.onCreate(state)
-        val container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            val inset = (24 * resources.displayMetrics.density).toInt()
-            setPadding(inset, inset, inset, inset)
-        }
-        val scroll = ScrollView(this).apply { addView(container); fitsSystemWindows = true }
-        setContentView(scroll)
-        scroll.setOnApplyWindowInsetsListener { v, insets ->
+        ui = OneUi(this)
+        window.statusBarColor = android.graphics.Color.TRANSPARENT
+        window.navigationBarColor = android.graphics.Color.TRANSPARENT
+        window.decorView.systemUiVisibility = if (ui.dark) 0 else
+            View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(ui.background) }
+        root.setOnApplyWindowInsetsListener { v, insets ->
             v.setPadding(insets.systemWindowInsetLeft, insets.systemWindowInsetTop,
                 insets.systemWindowInsetRight, insets.systemWindowInsetBottom)
             insets
         }
-        container.addView(TextView(this).apply { text = "PC 핫스팟"; textSize = 28f })
-        container.addView(TextView(this).apply {
-            text = "한 번 등록한 뒤 빠른 설정에서 켜고 끄세요.\n\n1. PC 터미널에서 pc-hotspot enroll 실행\n2. 아래에서 PC 검색 후 선택\n3. PC와 폰의 번호가 같으면 양쪽에서 승인\n4. 빠른 설정에 ‘PC 핫스팟’ 추가\n\n폰 잠금을 해제하고 사용하세요. 폰과 PC의 블루투스가 켜져 있어야 합니다."
-            textSize = 16f
-        })
-        status = TextView(this).apply { textSize = 16f; text = savedLabel() }
-        container.addView(status)
-        updateStatus = TextView(this).apply { text = "앱 ${packageManager.getPackageInfo(packageName, 0).versionName} · 업데이트 확인 중…" }
-        container.addView(updateStatus)
-        button(container, "업데이트 확인") { checkUpdates() }
-        button(container, "다운로드한 업데이트 설치") { UpdateManager.install(this) }
-        button(container, "업데이트 알림 허용") {
-            if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
-                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 2)
-            else updateStatus.text = "업데이트 알림이 허용되어 있습니다"
+        setContentView(root)
+        val scroll = ScrollView(this).apply { isFillViewport = true; clipToPadding = false }
+        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        val centered = LinearLayout(this).apply { gravity = android.view.Gravity.TOP or android.view.Gravity.CENTER_HORIZONTAL }
+        scroll.addView(centered)
+        val available = resources.configuration.screenWidthDp
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(ui.dp(20), 0, ui.dp(20), ui.dp(28))
         }
-        UpdateManager.schedule(this)
-        checkUpdates()
-        button(container, "근처 기기 권한 허용") { if (!permitted()) requestPermissions(permissions, 1) else status.text = "권한이 허용되어 있습니다" }
-        button(container, "블루투스 설정") { startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) }
-        button(container, "PC 검색 (10초)") { scan() }
-        devices = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        container.addView(devices)
-        button(container, "등록된 PC 상태 확인") {
-            if (session != null) return@button
+        centered.addView(container, LinearLayout.LayoutParams(if (available > 720) ui.dp(720) else -1, -2))
+        container.addView(ui.label("PC 핫스팟", 34f).apply {
+            typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+            setPadding(ui.dp(8), ui.dp(if (resources.configuration.screenHeightDp > 600) 64 else 20), 0, ui.dp(12))
+            setAccessibilityHeading(true)
+        })
+        container.addView(ui.label("가까이 있는 PC와 간편하게 연결하세요", 15f, true).apply { setPadding(ui.dp(8), 0, 0, ui.dp(14)) })
+        val connectionPage = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val settingsPage = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
+        container.addView(connectionPage); container.addView(settingsPage)
+        val connection = ui.section(connectionPage, "내 PC")
+        status = ui.label(savedLabel(), 20f)
+        connection.addView(status)
+        connection.addView(ui.label("폰과 PC의 블루투스를 켜 주세요", 14f, true))
+        ui.button(connection, "핫스팟 켜기 / 끄기", true) {
+            if (session == null) {
+                val address = Protocol.preferences(this).getString("address", null)
+                if (address == null) status.text = "아래에서 PC를 먼저 등록하세요" else runSession(address, Mode.TOGGLE)
+            }
+        }
+        ui.button(connection, "상태 새로고침") {
             val address = Protocol.preferences(this).getString("address", null)
             if (address == null) status.text = "PC를 먼저 등록하세요"
-            else runSession(address, Mode.QUERY)
+            else if (session == null) runSession(address, Mode.QUERY)
         }
-        button(container, "빠른 설정 타일 추가") {
-            if (Build.VERSION.SDK_INT >= 33) {
-                getSystemService(StatusBarManager::class.java).requestAddTileService(
-                    ComponentName(this, HotspotTileService::class.java), "PC 핫스팟",
-                    Icon.createWithResource(this, R.drawable.ic_hotspot), mainExecutor
-                ) { status.text = "타일이 보이지 않으면 빠른 설정 편집에서 추가하세요" }
-            } else status.text = "빠른 설정을 두 번 내리고 편집에서 ‘PC 핫스팟’을 추가하세요"
+        val automatic = ui.section(connectionPage, "자동 연결")
+        autoSwitch = ui.toggle(automatic, "핫스팟에 자동 연결", "PC 핫스팟이 켜지면 Wi-Fi 연결을 시도합니다", AutoConnect.enabled(this)) { enabled ->
+            if (enabled) configureAutoConnect() else { AutoConnect.stop(this); refreshAutoStatus() }
         }
-        button(container, "이 폰의 PC 등록 지우기") {
+        autoStatus = ui.label("", 14f, true); automatic.addView(autoStatus)
+        ui.button(automatic, "연결 정보 설정") { configureAutoConnect() }
+        ui.button(automatic, "Wi-Fi 설정") { startActivity(Intent(Settings.ACTION_WIFI_SETTINGS)) }
+        val setup = ui.section(connectionPage, "PC 등록")
+        setup.addView(ui.label("처음에는 PC에서 등록 모드를 연 뒤 검색하세요. 페어링 번호가 같으면 양쪽에서 승인하세요.", 14f, true))
+        ui.button(setup, "PC 검색") { scan() }
+        devices = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }; setup.addView(devices)
+        ui.button(setup, "빠른 설정에 타일 추가") { addTile() }
+        val updates = ui.section(settingsPage, "앱 업데이트")
+        updates.addView(ui.label("버전 ${packageManager.getPackageInfo(packageName, 0).versionName}", 20f))
+        ui.toggle(updates, "업데이트 자동 확인", "약 6시간마다 확인하고 새 버전을 준비합니다", UpdateManager.automatic(this)) {
+            UpdateManager.setAutomatic(this, it)
+        }
+        updateStatus = ui.label("업데이트 확인 중…", 14f, true); updates.addView(updateStatus)
+        checkUpdate = ui.button(updates, "지금 확인") { checkUpdates() }
+        installUpdate = ui.button(updates, "업데이트 설치", true) { UpdateManager.install(this) }
+        updates.addView(ui.label("새 버전은 알림으로 알려드립니다. 설치할 때만 확인이 필요합니다.", 13f, true).apply { setPadding(0, ui.dp(12), 0, 0) })
+        val permissionsCard = ui.section(settingsPage, "권한 및 연결")
+        ui.button(permissionsCard, "알림 허용") {
+            if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
+                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 2)
+            else Toast.makeText(this, "알림이 허용되어 있습니다", Toast.LENGTH_SHORT).show()
+        }
+        ui.button(permissionsCard, "근처 기기 권한 허용") {
+            if (!permitted()) requestPermissions(permissions, 1) else status.text = "권한이 허용되어 있습니다"
+        }
+        ui.button(permissionsCard, "블루투스 설정") { startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) }
+        ui.button(permissionsCard, "PC 등록 해제") {
             if (session != null) return@button
-            android.app.AlertDialog.Builder(this).setMessage("앱의 등록 정보를 지웁니다. PC에서 pc-hotspot revoke를 실행하고, 다시 등록하려면 양쪽 블루투스 설정에서 페어링도 삭제하세요.")
-                .setPositiveButton("지우기") { _, _ ->
-                    Protocol.preferences(this).edit().clear().apply()
-                    status.text = savedLabel()
+            android.app.AlertDialog.Builder(this).setTitle("PC 등록을 해제할까요?")
+                .setMessage("자동 연결도 중지됩니다. 다시 등록하려면 양쪽 블루투스 설정에서 페어링을 삭제하고 PC 등록 모드를 열어 주세요.")
+                .setPositiveButton("해제") { _, _ ->
+                    AutoConnect.stop(this); Protocol.preferences(this).edit().clear().apply()
+                    status.text = savedLabel(); refreshAutoStatus()
                     TileService.requestListeningState(this, ComponentName(this, HotspotTileService::class.java))
                 }.setNegativeButton("취소", null).show()
         }
+        val nav = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(ui.dp(16), ui.dp(4), ui.dp(16), ui.dp(4)); setBackgroundColor(ui.surface) }
+        root.addView(nav)
+        val tabs = mutableListOf<Button>()
+        fun tab(title: String, first: Boolean) {
+            val wrapper = LinearLayout(this)
+            nav.addView(wrapper, LinearLayout.LayoutParams(0, -2, 1f))
+            val b = ui.button(wrapper, title) {
+                connectionPage.visibility = if (first) View.VISIBLE else View.GONE
+                settingsPage.visibility = if (first) View.GONE else View.VISIBLE
+                scroll.scrollTo(0, 0)
+                tabs.forEach { item ->
+                    item.isSelected = item.text == title
+                    item.setTextColor(if (item.isSelected) ui.accent else ui.secondary)
+                    item.typeface = android.graphics.Typeface.create(if (item.isSelected) "sans-serif-medium" else "sans-serif", android.graphics.Typeface.NORMAL)
+                }
+            }
+            tabs.add(b)
+            b.isSelected = first
+            b.setTextColor(if (first) ui.accent else ui.secondary)
+        }
+        tab("연결", true); tab("설정", false)
+        UpdateManager.schedule(this)
+        refreshAutoStatus(); checkUpdates()
+        if (AutoConnect.enabled(this) && Protocol.permitted(this))
+            runCatching { startForegroundService(Intent(this, AutoConnectService::class.java)) }
+    }
+    private fun addTile() {
+        if (Build.VERSION.SDK_INT >= 33) getSystemService(StatusBarManager::class.java).requestAddTileService(
+            ComponentName(this, HotspotTileService::class.java), "PC 핫스팟",
+            Icon.createWithResource(this, R.drawable.ic_hotspot), mainExecutor
+        ) { status.text = "빠른 설정 편집에서도 타일을 추가할 수 있습니다" }
+        else status.text = "빠른 설정 편집에서 ‘PC 핫스팟’을 추가하세요"
+    }
+    private fun refreshAutoStatus() {
+        autoStatus.text = if (AutoConnect.enabled(this)) AutoConnect.prefs(this).getString("status", "PC 연결 대기") else "꺼짐 · 필요할 때 켜 주세요"
+        autoSwitch?.setOnCheckedChangeListener(null)
+        autoSwitch?.isChecked = AutoConnect.enabled(this)
+        autoSwitch?.setOnCheckedChangeListener { _, enabled ->
+            if (enabled) configureAutoConnect() else { AutoConnect.stop(this); refreshAutoStatus() }
+        }
+    }
+    private fun configureAutoConnect() {
+        if (Protocol.preferences(this).getString("address", null) == null) {
+            status.text = "PC를 먼저 등록하세요"; refreshAutoStatus(); return
+        }
+        if (!permitted()) { requestPermissions(permissions, 1); refreshAutoStatus(); return }
+        val p = AutoConnect.prefs(this)
+        val form = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(ui.dp(24), ui.dp(12), ui.dp(24), 0) }
+        val ssid = EditText(this).apply { hint = "Wi-Fi 이름"; setText(p.getString("ssid", "archHotspot")); setSingleLine() }
+        val password = EditText(this).apply {
+            hint = if (p.contains("password")) "저장된 비밀번호 사용 · 변경할 때만 입력" else "핫스팟 비밀번호"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setSingleLine()
+        }
+        form.addView(ssid); form.addView(password)
+        form.addView(ui.label("다른 Wi-Fi를 사용 중이면 Android가 현재 연결을 유지할 수 있습니다.", 13f, true))
+        val dialog = android.app.AlertDialog.Builder(this).setTitle("자동 연결 설정").setView(form)
+            .setPositiveButton("저장 후 켜기", null).setNegativeButton("취소") { _, _ -> refreshAutoStatus() }.create()
+        dialog.setOnCancelListener { refreshAutoStatus() }
+        dialog.setOnShowListener {
+            dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val name = ssid.text.toString().trim()
+                val pass = password.text.toString().ifEmpty { p.getString("password", "") ?: "" }
+                if (name.toByteArray(Charsets.UTF_8).size !in 1..32 || pass.length !in 8..63 || pass.any { it.code !in 32..126 }) {
+                    password.error = "Wi-Fi 이름과 8~63자의 비밀번호를 확인하세요"; return@setOnClickListener
+                }
+                AutoConnect.stop(this)
+                p.edit().putString("ssid", name).putString("password", pass).putBoolean("enabled", true).apply()
+                autoStatus.text = AutoConnect.register(this)
+                try {
+                    startForegroundService(Intent(this, AutoConnectService::class.java))
+                    dialog.dismiss(); refreshAutoStatus()
+                } catch (_: Exception) {
+                    AutoConnect.stop(this); password.error = "자동 연결을 시작하지 못했습니다. 권한을 확인하세요"
+                }
+            }
+        }
+        dialog.show()
+    }
+    override fun onResume() { super.onResume(); if (::autoStatus.isInitialized) refreshAutoStatus() }
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 7023 && packageManager.canRequestPackageInstalls()) UpdateManager.install(this)
     }
     private fun checkUpdates() {
         updateStatus.text = "업데이트 확인 중…"
+        checkUpdate.isEnabled = false
         UpdateManager.check(this) { result ->
             if (isDestroyed) return@check
-            updateStatus.text = result.message
-            if (result.ready) android.app.AlertDialog.Builder(this)
+            checkUpdate.isEnabled = true
+            updateStatus.text = result.message + "\n" + UpdateManager.lastCheckLabel(this)
+            installUpdate.visibility = if (result.ready) View.VISIBLE else View.GONE
+            if (result.ready && intent.getBooleanExtra("update", false)) android.app.AlertDialog.Builder(this)
                 .setMessage("새 버전 다운로드와 서명 검증을 완료했습니다. 설치할까요?")
                 .setPositiveButton("설치") { _, _ -> UpdateManager.install(this) }
                 .setNegativeButton("나중에", null).show()
         }
     }
-    private fun savedLabel() = Protocol.preferences(this).getString("address", null)?.let { "등록된 PC: $it" } ?: "등록된 PC 없음"
+    private fun savedLabel() = if (Protocol.preferences(this).contains("address")) "등록된 PC" else "등록된 PC 없음"
     private fun scan() {
         if (session != null) return
         if (!permitted()) { requestPermissions(permissions, 1); return }

@@ -116,7 +116,7 @@ class Characteristic(ServiceInterface):
             self.server.busy = False
     @method()
     def StartNotify(self):
-        if self.uuid != RESULT_UUID:
+        if self.uuid not in (RESULT_UUID, STATE_UUID):
             raise DBusError('org.bluez.Error.NotSupported', 'No notifications')
         # BlueZ applies authenticated encryption to the CCC write. This API has
         # no device argument, so never use a notification as authorization.
@@ -197,7 +197,7 @@ class Server:
         self.previous_pairable = None
         self.previous_pairable_timeout = None
         self.result = Characteristic(self, RESULT_UUID, ['read', 'notify', 'encrypt-authenticated-read', 'encrypt-authenticated-notify'])
-        self.state = Characteristic(self, STATE_UUID, ['read', 'encrypt-authenticated-read'])
+        self.state = Characteristic(self, STATE_UUID, ['read', 'notify', 'encrypt-authenticated-read', 'encrypt-authenticated-notify'])
         self.command = Characteristic(self, COMMAND_UUID, ['write', 'encrypt-authenticated-write'])
         self.stop = asyncio.Event()
     def allowed(self):
@@ -377,6 +377,15 @@ class Server:
                     except Exception:
                         self.stop.set()
                         return
+                # Observe actual NM state, including changes made by F9 or the UI.
+                # No control commands are issued by this observer.
+                if self.state.notifying:
+                    try:
+                        value = bytes([1, int(await asyncio.to_thread(current_state)), 0])
+                    except ControlError:
+                        value = bytes([1, 2, 3])
+                    if value != self.state.value:
+                        self.state.publish(value)
                 await asyncio.sleep(2)
         health = asyncio.create_task(check_bluez())
         for sig in (signal.SIGINT, signal.SIGTERM):

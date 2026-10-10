@@ -26,11 +26,22 @@ object UpdateManager {
     private val main = Handler(Looper.getMainLooper())
     data class Result(val message: String, val ready: Boolean = false)
     private fun prefs(c: Context) = c.getSharedPreferences("updates", Context.MODE_PRIVATE)
+    fun automatic(c: Context) = prefs(c).getBoolean("automatic", true)
+    fun setAutomatic(c: Context, enabled: Boolean) {
+        prefs(c).edit().putBoolean("automatic", enabled).apply()
+        if (enabled) schedule(c) else c.getSystemService(JobScheduler::class.java).cancel(JOB_ID)
+    }
+    fun lastCheckLabel(c: Context): String {
+        val time = prefs(c).getLong("last_check", 0)
+        return if (time == 0L) "아직 확인한 기록이 없습니다" else "마지막 확인 시도: " +
+            java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT).format(java.util.Date(time))
+    }
     fun apk(c: Context) = File(c.filesDir, "updates/update.apk")
     fun schedule(c: Context) {
         c.getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(CHANNEL, "앱 업데이트", NotificationManager.IMPORTANCE_DEFAULT))
         val scheduler = c.getSystemService(JobScheduler::class.java)
+        if (!automatic(c)) { scheduler.cancel(JOB_ID); return }
         if (scheduler.getPendingJob(JOB_ID) == null) scheduler.schedule(
             JobInfo.Builder(JOB_ID, ComponentName(c, UpdateJobService::class.java))
                 .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY).setPersisted(true)
@@ -43,6 +54,7 @@ object UpdateManager {
             val result = try { downloadIfNew(c) } catch (e: Exception) {
                 Result("업데이트 확인 실패 · ${e.message ?: e.javaClass.simpleName}", ready(c))
             } finally { checking.set(false) }
+            prefs(c).edit().putLong("last_check", System.currentTimeMillis()).apply()
             main.post { callback(result) }
         }
     }
@@ -89,7 +101,7 @@ object UpdateManager {
         if (!UpdatePolicy.validate(version, installed, manifest.getInt("minSdk"), Build.VERSION.SDK_INT,
                 downloadUrl, expectedHash, expectedSize)) {
             if (prefs(c).getLong("version", 0) <= installed) {
-                apk(c).delete(); prefs(c).edit().clear().apply()
+                apk(c).delete(); prefs(c).edit().remove("version").remove("sha256").remove("versionName").apply()
                 c.getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
             }
             return Result("현재 버전이 최신입니다")
@@ -158,8 +170,8 @@ object UpdateManager {
     fun install(activity: Activity) {
         if (!ready(activity)) { ToastMessage.show(activity, "설치할 새 버전이 없습니다"); return }
         if (!activity.packageManager.canRequestPackageInstalls()) {
-            activity.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${activity.packageName}")))
-            ToastMessage.show(activity, "PC 핫스팟의 설치 허용 후 ‘업데이트 설치’를 다시 누르세요")
+            activity.startActivityForResult(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${activity.packageName}")), 7023)
+            ToastMessage.show(activity, "PC 핫스팟의 설치를 허용한 뒤 돌아오세요")
             return
         }
         val uri = Uri.parse("content://${activity.packageName}.updates/update.apk")
